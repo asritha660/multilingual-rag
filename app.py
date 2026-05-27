@@ -11,8 +11,11 @@ from google import genai
 
 # --- One-time setup ---
 load_dotenv()
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-
+# Read the key from Streamlit secrets if deployed, otherwise from .env locally
+api_key = st.secrets.get("GEMINI_API_KEY") if hasattr(st, "secrets") else None
+if not api_key:
+    api_key = os.environ.get("GEMINI_API_KEY")
+client = genai.Client(api_key=api_key)
 # --- Load the embedding model ONCE (cached) ---
 @st.cache_resource
 def load_model():
