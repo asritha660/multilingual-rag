@@ -9,3 +9,4 @@ chromadb
 rank-bm25
 google-genai
 python-dotenv
+protobuf<5
