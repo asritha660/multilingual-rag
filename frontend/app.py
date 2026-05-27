@@ -8,6 +8,8 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from rank_bm25 import BM25Okapi
 from google import genai
+from langdetect import detect, DetectorFactory
+DetectorFactory.seed = 0   # makes detection deterministic
 
 # --- One-time setup ---
 load_dotenv()
@@ -118,6 +120,17 @@ if st.button("Ask"):
         st.warning("Please type a question first.")
     else:
         try:
+            # Detect the language of the question
+            detected_lang = detect(question)
+            lang_names = {
+                "en": "English", "hi": "Hindi", "es": "Spanish", "fr": "French",
+                "de": "German", "te": "Telugu", "ta": "Tamil", "bn": "Bengali",
+                "ar": "Arabic", "zh-cn": "Chinese", "ja": "Japanese", "ru": "Russian",
+                "pt": "Portuguese", "it": "Italian",
+            }
+            lang_display = lang_names.get(detected_lang, detected_lang.upper())
+            st.caption(f"🌐 Detected language: **{lang_display}** (`{detected_lang}`)")
+
             with st.spinner("Searching and thinking..."):
                 chunks = retrieve(question)
                 answer = generate_answer(question, chunks)
