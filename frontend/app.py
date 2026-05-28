@@ -102,3 +102,25 @@ if st.button("Ask"):
                     st.error("📄 Could not answer. Have you uploaded and processed a PDF yet?")
             except Exception as e:
                 st.error(f"Something went wrong: {e}")
+
+# --- Query History section ---
+st.divider()
+st.subheader("📊 Query History")
+if st.button("Load recent queries"):
+    try:
+        resp = requests.get(f"{BACKEND_URL}/history", timeout=10)
+        resp.raise_for_status()
+        rows = resp.json()["queries"]
+        if not rows:
+            st.info("No queries logged yet. Ask a question above!")
+        else:
+            for r in rows:
+                st.markdown(
+                    f"**Q:** {r['user_query']}  \n"
+                    f"🌐 {r['detected_language']} · "
+                    f"⏱️ {r['response_time_ms']} ms · "
+                    f"📄 {r['retrieved_chunks']} chunks"
+                )
+    except Exception as e:
+        st.error(f"Could not load history: {e}")
+

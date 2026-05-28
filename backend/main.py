@@ -24,6 +24,8 @@ import chromadb
 from rank_bm25 import BM25Okapi
 from google import genai
 from langdetect import detect, DetectorFactory
+import time
+from backend import database
 
 DetectorFactory.seed = 0  # deterministic language detection
 
@@ -166,17 +168,46 @@ def health_check():
 async def upload_pdf(file: UploadFile = File(...)):
     """Accept a PDF file and process it into the vector store."""
     n_chunks = process_pdf(file.file)
+    # Log this document to PostgreSQL
+    database.log_document(
+        file_name=file.filename,
+        language="auto",
+        chunk_count=n_chunks,
+        metadata={"source": "upload"},
+    )
     return {"filename": file.filename, "chunks_stored": n_chunks}
 
 
 @app.post("/ask", response_model=AskResponse)
 def ask_question(req: AskRequest):
     """Accept a question and return a grounded answer with sources."""
+    start = time.time()
     detected_lang = detect(req.question)
     chunks = retrieve(req.question, language=detected_lang)
     answer = generate_answer(req.question, chunks)
+    elapsed_ms = int((time.time() - start) * 1000)
+
+    # Log this query to PostgreSQL
+    database.log_query(
+        user_query=req.question,
+        detected_language=detected_lang,
+        response_time_ms=elapsed_ms,
+        retrieved_chunks=len(chunks),
+        answer=answer,
+    )
+
     return AskResponse(
         answer=answer,
         detected_language=detected_lang,
         sources=chunks,
     )
+
+@app.get("/history")
+def query_history(limit: int = 20):
+    """Return the most recent queries from the logs."""
+    rows = database.get_recent_queries(limit=limit)
+    # Convert datetime objects to strings so they're JSON-serializable
+    for r in rows:
+        if r.get("created_at"):
+            r["created_at"] = r["created_at"].isoformat()
+    return {"queries": rows}
