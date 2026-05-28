@@ -11,3 +11,7 @@ google-genai
 python-dotenv
 protobuf<5
 langdetect
+fastapi
+uvicorn
+python-multipart
+requests
