@@ -1,0 +1,35 @@
+{
+  "description": "Evaluation test set for the Multilingual RAG Assistant, based on sample.pdf (the project plan).",
+  "tests": [
+    {
+      "question": "What vector database does this project recommend?",
+      "expected_keywords": ["Qdrant", "ChromaDB"],
+      "language": "en"
+    },
+    {
+      "question": "What programming language is used in this project?",
+      "expected_keywords": ["Python"],
+      "language": "en"
+    },
+    {
+      "question": "What is recommended for the backend?",
+      "expected_keywords": ["FastAPI"],
+      "language": "en"
+    },
+    {
+      "question": "How is the frontend deployed?",
+      "expected_keywords": ["Streamlit", "Vercel"],
+      "language": "en"
+    },
+    {
+      "question": "What embeddings does the project suggest?",
+      "expected_keywords": ["Cohere", "OpenAI"],
+      "language": "en"
+    },
+    {
+      "question": "इस प्रोजेक्ट के लिए कौन सा डेटाबेस अच्छा है?",
+      "expected_keywords": ["PostgreSQL", "MongoDB", "Qdrant", "ChromaDB"],
+      "language": "hi"
+    }
+  ]
+}
