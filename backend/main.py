@@ -13,7 +13,7 @@ import os
 import re
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -26,6 +26,8 @@ from google import genai
 from langdetect import detect, DetectorFactory
 import time
 from backend import database
+from fastapi.security import OAuth2PasswordRequestForm
+from backend import auth
 
 DetectorFactory.seed = 0  # deterministic language detection
 
@@ -165,10 +167,9 @@ def health_check():
 
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
-    """Accept a PDF file and process it into the vector store."""
-    n_chunks = process_pdf(file.file)
-    # Log this document to PostgreSQL
+async def upload_pdf(file: UploadFile = File(...), user: str = Depends(auth.get_current_user)):
+    """Accept a PDF file and process it into the vector store. Requires login."""
+    n_chunks = process_pdf(file.file)    # Log this document to PostgreSQL
     database.log_document(
         file_name=file.filename,
         language="auto",
@@ -179,8 +180,8 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 
 @app.post("/ask", response_model=AskResponse)
-def ask_question(req: AskRequest):
-    """Accept a question and return a grounded answer with sources."""
+def ask_question(req: AskRequest, user: str = Depends(auth.get_current_user)):
+    """Accept a question and return a grounded answer with sources. Requires login."""
     start = time.time()
     detected_lang = detect(req.question)
     chunks = retrieve(req.question, language=detected_lang)
@@ -211,3 +212,28 @@ def query_history(limit: int = 20):
         if r.get("created_at"):
             r["created_at"] = r["created_at"].isoformat()
     return {"queries": rows}
+
+# --- Authentication endpoints ---
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/register")
+def register(req: RegisterRequest):
+    """Create a new user account."""
+    hashed = auth.hash_password(req.password)
+    user_id = database.create_user(req.username, hashed)
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="Username already taken")
+    return {"message": "User registered successfully", "user_id": user_id}
+
+
+@app.post("/login")
+def login(form: OAuth2PasswordRequestForm = Depends()):
+    """Log in and receive a JWT access token."""
+    user = database.get_user(form.username)
+    if not user or not auth.verify_password(form.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = auth.create_access_token(form.username)
+    return {"access_token": token, "token_type": "bearer"}

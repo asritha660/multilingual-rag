@@ -1,23 +1,18 @@
 """
 Streamlit frontend for the Multilingual RAG Assistant.
 
-This is now a THIN client: it does no RAG work itself. It just sends
-HTTP requests to the FastAPI backend and displays the results.
+Thin client that talks to the FastAPI backend over HTTP.
+Now includes login/register; the token is sent on protected requests.
 
-Run with (in a separate terminal from the backend):
+Run with (backend must be running too):
   streamlit run frontend/app.py
-
-The backend must be running first:
-  uvicorn backend.main:app --reload --port 8000
 """
 
 import requests
 import streamlit as st
 
-# Where the backend lives. For local dev this is localhost:8000.
 BACKEND_URL = "http://127.0.0.1:8000"
 
-# Friendly names for detected language codes
 LANG_NAMES = {
     "en": "English", "hi": "Hindi", "es": "Spanish", "fr": "French",
     "de": "German", "te": "Telugu", "ta": "Tamil", "bn": "Bengali",
@@ -25,12 +20,9 @@ LANG_NAMES = {
     "pt": "Portuguese", "it": "Italian",
 }
 
-# ================= THE WEB PAGE =================
-
 st.title("📚 Multilingual RAG Assistant")
-st.write("Upload a PDF, then ask questions about it — in any language!")
 
-# --- Check the backend is reachable ---
+# --- Backend reachability check ---
 try:
     health = requests.get(f"{BACKEND_URL}/", timeout=5)
     backend_ok = health.status_code == 200
@@ -39,25 +31,99 @@ except Exception:
 
 if not backend_ok:
     st.error(
-        "⚠️ Cannot reach the backend. Make sure it's running in another terminal:\n\n"
+        "⚠️ Cannot reach the backend. Start it in another terminal:\n\n"
         "`uvicorn backend.main:app --reload --port 8000`"
     )
     st.stop()
+
+# --- Session state for the auth token ---
+if "token" not in st.session_state:
+    st.session_state.token = None
+if "username" not in st.session_state:
+    st.session_state.username = None
+
+
+def auth_headers():
+    """Return the Authorization header with the stored JWT."""
+    return {"Authorization": f"Bearer {st.session_state.token}"}
+
+
+# ============================================================
+# LOGGED OUT VIEW: show login / register
+# ============================================================
+if st.session_state.token is None:
+    st.write("Please log in or create an account to use the assistant.")
+
+    tab_login, tab_register = st.tabs(["Log in", "Register"])
+
+    with tab_login:
+        login_user = st.text_input("Username", key="login_user")
+        login_pass = st.text_input("Password", type="password", key="login_pass")
+        if st.button("Log in"):
+            try:
+                resp = requests.post(
+                    f"{BACKEND_URL}/login",
+                    data={"username": login_user, "password": login_pass},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    st.session_state.token = resp.json()["access_token"]
+                    st.session_state.username = login_user
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+            except Exception as e:
+                st.error(f"Login failed: {e}")
+
+    with tab_register:
+        reg_user = st.text_input("Choose a username", key="reg_user")
+        reg_pass = st.text_input("Choose a password", type="password", key="reg_pass")
+        if st.button("Register"):
+            try:
+                resp = requests.post(
+                    f"{BACKEND_URL}/register",
+                    json={"username": reg_user, "password": reg_pass},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    st.success("Account created! Switch to the Log in tab.")
+                else:
+                    detail = resp.json().get("detail", "Registration failed")
+                    st.error(detail)
+            except Exception as e:
+                st.error(f"Registration failed: {e}")
+
+    st.stop()  # don't show the rest of the app until logged in
+
+
+# ============================================================
+# LOGGED IN VIEW: the actual app
+# ============================================================
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.write(f"Logged in as **{st.session_state.username}**. Upload a PDF and ask away — in any language!")
+with col2:
+    if st.button("Log out"):
+        st.session_state.token = None
+        st.session_state.username = None
+        st.rerun()
 
 # --- Upload section ---
 uploaded = st.file_uploader("Upload a PDF", type="pdf")
 if uploaded is not None:
     if st.button("Process this PDF"):
-        with st.spinner("Sending document to the backend for processing..."):
+        with st.spinner("Sending document to the backend..."):
             try:
                 files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
-                resp = requests.post(f"{BACKEND_URL}/upload", files=files, timeout=120)
+                resp = requests.post(
+                    f"{BACKEND_URL}/upload",
+                    files=files,
+                    headers=auth_headers(),
+                    timeout=120,
+                )
                 resp.raise_for_status()
                 data = resp.json()
-                st.success(
-                    f"Done! Stored {data['chunks_stored']} chunks from "
-                    f"{data['filename']}. You can now ask questions below."
-                )
+                st.success(f"Done! Stored {data['chunks_stored']} chunks from {data['filename']}.")
             except Exception as e:
                 st.error(f"Upload failed: {e}")
 
@@ -74,6 +140,7 @@ if st.button("Ask"):
                 resp = requests.post(
                     f"{BACKEND_URL}/ask",
                     json={"question": question},
+                    headers=auth_headers(),
                     timeout=120,
                 )
                 resp.raise_for_status()
@@ -89,19 +156,8 @@ if st.button("Ask"):
                 with st.expander("📄 See the sources used"):
                     for i, ch in enumerate(data["sources"]):
                         st.markdown(f"**Source {i+1}:** {ch}")
-
-            except requests.exceptions.HTTPError:
-                detail = ""
-                try:
-                    detail = resp.json().get("detail", "")
-                except Exception:
-                    pass
-                if "RESOURCE_EXHAUSTED" in str(detail) or "429" in str(detail):
-                    st.error("⏳ We've hit the API rate limit. Please wait a minute and try again.")
-                else:
-                    st.error("📄 Could not answer. Have you uploaded and processed a PDF yet?")
             except Exception as e:
-                st.error(f"Something went wrong: {e}")
+                st.error(f"Could not get an answer: {e}")
 
 # --- Query History section ---
 st.divider()
@@ -123,4 +179,3 @@ if st.button("Load recent queries"):
                 )
     except Exception as e:
         st.error(f"Could not load history: {e}")
-

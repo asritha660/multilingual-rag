@@ -16,3 +16,7 @@ uvicorn
 python-multipart
 requests
 psycopg2-binary
+python-jose[cryptography]
+passlib[bcrypt]
+email-validator
+bcrypt==4.0.1

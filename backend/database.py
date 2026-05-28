@@ -87,3 +87,39 @@ def get_recent_queries(limit=20):
             return cur.fetchall()
     finally:
         conn.close()
+
+def create_user(username, hashed_password):
+    """Insert a new user. Returns user_id, or None if username already taken."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (username, hashed_password)
+                VALUES (%s, %s)
+                RETURNING user_id;
+                """,
+                (username, hashed_password),
+            )
+            user_id = cur.fetchone()[0]
+        conn.commit()
+        return user_id
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return None  # username already exists
+    finally:
+        conn.close()
+
+
+def get_user(username):
+    """Look up a user by username. Returns dict with user_id, username, hashed_password, or None."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT user_id, username, hashed_password FROM users WHERE username = %s;",
+                (username,),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
