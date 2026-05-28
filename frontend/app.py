@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import streamlit as st
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer,CrossEncoder
+from sentence_transformers import SentenceTransformer, CrossEncoder
 import chromadb
 from rank_bm25 import BM25Okapi
 from google import genai
@@ -22,7 +22,9 @@ except Exception:
 if not api_key:
     api_key = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key)
-# --- Load the embedding model ONCE (cached) ---
+
+
+# --- Load the embedding model + reranker ONCE (cached) ---
 @st.cache_resource
 def load_models():
     embed = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
@@ -30,6 +32,7 @@ def load_models():
     return embed, reranker
 
 embed_model, reranker = load_models()
+
 
 # --- Helper: read + clean text from an uploaded PDF ---
 def extract_clean_text(uploaded_file):
@@ -41,6 +44,7 @@ def extract_clean_text(uploaded_file):
         page_text = re.sub(r"\s+", " ", page_text)
         full_text += page_text + "\n"
     return full_text
+
 
 # --- Helper: process a PDF into the vector database (REPLACES old content) ---
 def process_pdf(uploaded_file):
@@ -61,10 +65,12 @@ def process_pdf(uploaded_file):
     )
     return len(chunks)
 
+
 # --- Helper: connect to the existing database ---
 def get_collection():
     client = chromadb.PersistentClient(path="vector_store")
     return client.get_collection("documents")
+
 
 # --- Hybrid retrieval ---
 def retrieve(question, language="en"):
@@ -84,6 +90,7 @@ def retrieve(question, language="en"):
     for ch in vector_chunks + keyword_chunks:
         if ch not in merged:
             merged.append(ch)
+
     # Stage 2: rerank ONLY for English queries.
     # The cross-encoder is English-trained, so it misranks cross-lingual pairs.
     if language == "en":
@@ -94,6 +101,7 @@ def retrieve(question, language="en"):
     else:
         # For non-English queries, trust hybrid recall and return top 6 candidates
         return merged[:6]
+
 
 # --- Generation ---
 def generate_answer(question, chunks):
@@ -112,6 +120,7 @@ ANSWER:"""
         contents=prompt,
     )
     return response.text
+
 
 # ================= THE WEB PAGE =================
 
@@ -154,7 +163,7 @@ if st.button("Ask"):
             with st.expander("📄 See the sources used"):
                 for i, ch in enumerate(chunks):
                     st.markdown(f"**Source {i+1}:** {ch}")
-       except Exception as e:
+        except Exception as e:
             error_text = str(e)
             if "RESOURCE_EXHAUSTED" in error_text or "429" in error_text:
                 st.error("⏳ We've hit the API rate limit. Please wait a minute and try again.")
