@@ -4,24 +4,32 @@ from dotenv import load_dotenv
 import streamlit as st
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer,CrossEncoder
 import chromadb
 from rank_bm25 import BM25Okapi
 from google import genai
+from langdetect import detect, DetectorFactory
+DetectorFactory.seed = 0   # makes detection deterministic
 
 # --- One-time setup ---
 load_dotenv()
-# Read the key from Streamlit secrets if deployed, otherwise from .env locally
-api_key = st.secrets.get("GEMINI_API_KEY") if hasattr(st, "secrets") else None
+# Read the key from Streamlit secrets if deployed (cloud), otherwise from .env (local)
+api_key = None
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    pass
 if not api_key:
     api_key = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key)
 # --- Load the embedding model ONCE (cached) ---
 @st.cache_resource
-def load_model():
-    return SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+def load_models():
+    embed = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return embed, reranker
 
-embed_model = load_model()
+embed_model, reranker = load_models()
 
 # --- Helper: read + clean text from an uploaded PDF ---
 def extract_clean_text(uploaded_file):
@@ -59,7 +67,7 @@ def get_collection():
     return client.get_collection("documents")
 
 # --- Hybrid retrieval ---
-def retrieve(question):
+def retrieve(question, language="en"):
     collection = get_collection()
     q_emb = embed_model.encode(question).tolist()
     all_chunks = collection.get()["documents"]
@@ -76,7 +84,16 @@ def retrieve(question):
     for ch in vector_chunks + keyword_chunks:
         if ch not in merged:
             merged.append(ch)
-    return merged
+    # Stage 2: rerank ONLY for English queries.
+    # The cross-encoder is English-trained, so it misranks cross-lingual pairs.
+    if language == "en":
+        pairs = [[question, chunk] for chunk in merged]
+        scores = reranker.predict(pairs)
+        reranked = sorted(zip(scores, merged), key=lambda x: x[0], reverse=True)
+        return [chunk for score, chunk in reranked[:4]]
+    else:
+        # For non-English queries, trust hybrid recall and return top 6 candidates
+        return merged[:6]
 
 # --- Generation ---
 def generate_answer(question, chunks):
@@ -118,13 +135,30 @@ if st.button("Ask"):
         st.warning("Please type a question first.")
     else:
         try:
+            # Detect the language of the question
+            detected_lang = detect(question)
+            lang_names = {
+                "en": "English", "hi": "Hindi", "es": "Spanish", "fr": "French",
+                "de": "German", "te": "Telugu", "ta": "Tamil", "bn": "Bengali",
+                "ar": "Arabic", "zh-cn": "Chinese", "ja": "Japanese", "ru": "Russian",
+                "pt": "Portuguese", "it": "Italian",
+            }
+            lang_display = lang_names.get(detected_lang, detected_lang.upper())
+            st.caption(f"🌐 Detected language: **{lang_display}** (`{detected_lang}`)")
+
             with st.spinner("Searching and thinking..."):
-                chunks = retrieve(question)
+                chunks = retrieve(question, language=detected_lang)
                 answer = generate_answer(question, chunks)
             st.subheader("Answer")
             st.write(answer)
             with st.expander("📄 See the sources used"):
                 for i, ch in enumerate(chunks):
                     st.markdown(f"**Source {i+1}:** {ch}")
-        except Exception:
-            st.error("No document found. Please upload and process a PDF first.")
+       except Exception as e:
+            error_text = str(e)
+            if "RESOURCE_EXHAUSTED" in error_text or "429" in error_text:
+                st.error("⏳ We've hit the API rate limit. Please wait a minute and try again.")
+            elif "get_collection" in error_text or "does not exist" in error_text:
+                st.error("📄 No document found. Please upload and process a PDF first.")
+            else:
+                st.error(f"Something went wrong: {error_text}")
