@@ -2,7 +2,7 @@
 
 ## Overview
 
-This report documents the measured performance of the Multilingual RAG Assistant on a curated test set. Evaluation covers retrieval quality, faithfulness of generated answers, end-to-end latency, and the deployment economics of the architecture. The test set lives in `evaluation/test_set.json` and the scripts that produced these numbers are `evaluation/evaluate_retrieval.py` and `evaluation/evaluate_faithfulness.py`.
+This report documents the measured performance of the Multilingual RAG Assistant on a curated test set. Evaluation covers retrieval quality, faithfulness of generated answers, end-to-end latency, cross-lingual coverage, and the deployment economics of the architecture. The test set lives in `evaluation/test_set.json` and the scripts that produced these numbers are `evaluation/evaluate_retrieval.py` and `evaluation/evaluate_faithfulness.py`.
 
 ## Test Corpus
 
@@ -83,6 +83,21 @@ This is the expected behavior of a small-corpus retrieval system at K=4: once th
 
 The first two are 30-minute changes. The third is a more substantial reingest-and-test cycle.
 
+## Cross-Lingual Coverage
+
+The pipeline was tested informally on a third language (Telugu) beyond the formally evaluated English and Hindi. The result is informative as a real-world cross-lingual finding:
+
+- **Hindi cross-lingual retrieval (Hindi query → English corpus):** works correctly. The Hindi age question (test question 6) retrieved the right chunk and Gemini returned a grounded Hindi answer matching the document. The embedding alignment between Hindi and English in `paraphrase-multilingual-MiniLM-L12-v2` is strong enough to bridge the language gap for this kind of factual lookup.
+- **Telugu cross-lingual retrieval (Telugu query → English corpus):** language detection and generation work end-to-end (the system correctly identified Telugu as `te` and produced a syntactically correct Telugu sentence), but retrieval did not surface the relevant English chunk. The system returned a fluent Telugu sentence equivalent to "I do not know what the minimum age is." This is the **correct** behavior under our faithfulness constraints: when retrieval misses, the model refuses to fabricate an answer.
+
+The most likely cause is weaker embedding alignment between Telugu (Dravidian, different script) and English in the underlying model compared to Hindi (Indo-Aryan, Devanagari script — same script as Sanskrit-derived English borrowings). Cross-lingual alignment is known to be uneven across language pairs in general-purpose multilingual embedding models, especially for lower-resource language combinations.
+
+This is reported as a finding rather than a fix because the appropriate mitigation depends on use-case priorities:
+- **For symmetric multilingual support**, the next step would be translating queries to English internally before retrieval (back-translation pattern), at the cost of an extra translation hop per query.
+- **For corpus-language priority**, the current behavior (best-effort retrieval, refuse-rather-than-hallucinate on miss) is the safer default.
+
+The system as built falls in the second camp, which is consistent with its overall faithfulness-first design.
+
 ## Comparison to Baseline
 
 A reasonable baseline for a single-retriever system on a 7-question test set would be approximately 0.6-0.8 hit rate with comparable precision. **7/7 hit rate with hybrid retrieval plus conditional reranking is above baseline**, and the system also recovers cleanly on a deliberately constructed keyword-dilution stress test. Faithfulness at 1.0 with a 0% hallucination rate indicates that when retrieval succeeds, generation is reliably grounded.
@@ -96,6 +111,8 @@ The backend is fully containerized (see `Dockerfile`) and verified to run on the
 The system was evaluated against three free-tier cloud hosts (Render, Railway, Fly.io) for portability. **All three free tiers cap memory at 256-512 MB**, which is insufficient for the loaded image: the multilingual embedding model (`paraphrase-multilingual-MiniLM-L12-v2`) and the cross-encoder reranker (`ms-marco-MiniLM-L-6-v2`), together with ChromaDB's in-memory index, occupy roughly 700-900 MB of resident memory once warmed up. The image is therefore deployable on any platform offering ≥1 GB RAM (Render Standard $25/mo, AWS t3.small, GCP e2-small, equivalent) but not on the major free tiers.
 
 This is a deliberate architectural choice. The alternative — calling hosted embedding and reranking APIs instead of running them locally — would fit a 256 MB container but would add ~150-300 ms of network latency to every query and introduce a third-party dependency for each retrieval. For a local-first system where retrieval latency is already a meaningful share of total request time (the rerank step alone is 0.2-0.5 s), keeping the models in-process is the better tradeoff. The cost is that the system is not free-tier-deployable as built.
+
+The PostgreSQL layer is the easier piece to host externally and was successfully tested against Neon (free-tier hosted Postgres). `backend/database.py` works against either local or hosted Postgres without code changes — only the `.env` connection variables change.
 
 For this portfolio context, the project ships as:
 - A fully working local stack (`uvicorn` + Streamlit) with end-to-end demonstration
@@ -111,6 +128,9 @@ To reproduce these numbers:
 ```powershell
 # Activate venv
 .\venv\Scripts\Activate.ps1
+
+# Set up Postgres (local or hosted Neon)
+python -c "from backend.database import get_connection; conn=get_connection(); cur=conn.cursor(); cur.execute(open('init_schema.sql').read()); conn.commit(); conn.close(); print('Schema created')"
 
 # Ingest the bundled test corpus (one time)
 python backend\ingest.py test_document.pdf
@@ -139,6 +159,7 @@ The backend will be reachable at `http://localhost:8000`.
 - **Single document corpus.** Multi-document retrieval has not been stress-tested.
 - **Faithfulness coverage of 6/7 questions** (the stress-test question was added to the retrieval set after the faithfulness script was last revised).
 - **Faithfulness judge is the same model family as the generator** (Gemini judging Gemini). A stronger judge model or a different judge family would give a more independent measurement.
+- **Cross-lingual retrieval quality is uneven across language pairs.** Tested on Hindi (works) and Telugu (retrieval misses); see Cross-Lingual Coverage section.
 - **No translation-quality metric** for the Hindi path. The Hindi answer was qualitatively verified to be in Hindi and topically correct, but no BLEU- or COMET-style score is computed.
 - **Free-tier rate limits** on Gemini (20 requests/day, 5/minute) constrain how often the faithfulness eval can be run end-to-end.
 - **Free-tier cloud hosts cannot run the full image** (see Deployment Analysis); deployment requires ≥1 GB RAM hosting.
@@ -146,6 +167,8 @@ The backend will be reachable at `http://localhost:8000`.
 ## Conclusion
 
 The Multilingual RAG Assistant achieves saturated recall (7/7 hit rate) and perfect faithfulness (6/6, 0% hallucinations) with ~2.9s end-to-end latency on a 7-question multilingual test set that includes a deliberate keyword-dilution stress test. The system's real remaining weakness is precision (0.35 average), which is the expected ceiling for K=4 on a small corpus and has clear, concrete mitigation paths.
+
+Cross-lingual retrieval works well for Hindi but exhibits real limits for less-represented language pairs (tested on Telugu) — a finding documented honestly rather than hidden, and one whose mitigation depends on whether symmetric multilingual support or faithfulness-on-miss is the priority.
 
 The system is portable (containerized) and reproducible (versioned test set + evaluation scripts + bundled test corpus) but is not deployable on the major free-tier cloud hosts due to memory footprint of the local-first embedding and reranking models — a documented architectural tradeoff in favor of latency and dependency independence.
 

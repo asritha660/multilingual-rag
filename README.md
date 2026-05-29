@@ -1,6 +1,6 @@
 # Multilingual RAG Assistant
 
-A production-grade Retrieval-Augmented Generation pipeline that answers questions about uploaded PDF documents in multiple languages, with grounded answers, cited sources, and a measurable evaluation harness.
+A production-grade Retrieval-Augmented Generation pipeline that answers questions about uploaded PDF documents, with grounded answers, cited sources, and a measurable evaluation harness.
 
 Built as a multi-service application: containerized FastAPI backend, decoupled Streamlit frontend, persistent ChromaDB vector store, PostgreSQL for users and query telemetry, and JWT authentication.
 
@@ -8,7 +8,7 @@ Built as a multi-service application: containerized FastAPI backend, decoupled S
 
 ## What this project demonstrates
 
-- **Multilingual retrieval** with shared-embedding-space queries across English, Hindi, and 50+ languages supported by the underlying model.
+- **Cross-lingual retrieval** with shared-embedding-space queries, tested end-to-end on English and Hindi. The underlying embedding model supports 50+ languages, but retrieval quality varies across languages (see [REPORT.md](REPORT.md) for measured cross-lingual notes).
 - **Hybrid retrieval**: dense vector search plus BM25 keyword search, fused and deduplicated.
 - **Conditional reranking**: a cross-encoder reranker is applied to English queries (the model is English-only) and skipped for other languages, which then use a wider hybrid top-K.
 - **Grounded generation**: answers are produced strictly from retrieved chunks, returned in the same language as the question, with a sources panel for verification.
@@ -33,7 +33,7 @@ The system achieves saturated recall and perfect faithfulness on this test set; 
 
 ![Architecture diagram](architecture.svg)
 
-The FastAPI backend is containerized (Python 3.11-slim, 622 MB compressed image). For development, the backend connects to the host PostgreSQL via `host.docker.internal`.
+The FastAPI backend is containerized (Python 3.11-slim, 622 MB compressed image). It runs locally with Docker Desktop and is portable to any host with at least 1 GB of RAM. See [REPORT.md](REPORT.md) for the deployment analysis explaining why free-tier hosts are not sufficient for this image.
 
 ## Tech Stack
 
@@ -47,7 +47,7 @@ The FastAPI backend is containerized (Python 3.11-slim, 622 MB compressed image)
 | Vector DB | ChromaDB (persistent local store) |
 | Keyword Search | BM25 via `rank-bm25` |
 | Generation | Google Gemini 2.5 Flash (via `google-genai`) |
-| Relational DB | PostgreSQL (users, documents, query_logs) |
+| Relational DB | PostgreSQL (users, documents, query_logs) — runs locally or on hosted services like Neon |
 | Language Detection | `langdetect` (seeded for determinism) |
 | PDF Parsing | `pypdf` |
 | Chunking | `langchain-text-splitters` RecursiveCharacterTextSplitter |
@@ -61,7 +61,7 @@ multilingual-rag/
 ├── backend/                  FastAPI app, retrieval, ingestion, auth, DB
 │   ├── main.py               API endpoints (/register, /login, /upload, /ask, /history)
 │   ├── ingest.py             PDF ingestion CLI + importable function
-│   ├── database.py           PostgreSQL connection and schema
+│   ├── database.py           PostgreSQL connection and helper functions
 │   └── auth.py               JWT issuance and verification
 ├── frontend/
 │   └── app.py                Streamlit UI calling the backend over HTTP
@@ -69,7 +69,9 @@ multilingual-rag/
 │   ├── test_set.json         Versioned test questions and expected keywords
 │   ├── evaluate_retrieval.py Hit Rate, Precision@K, latency (no LLM calls)
 │   └── evaluate_faithfulness.py Gemini-as-judge faithfulness scoring
+├── architecture.svg          Architecture diagram (also as PNG)
 ├── Dockerfile                Backend container (python:3.11-slim, port 8000)
+├── init_schema.sql           PostgreSQL schema (users, documents, query_logs)
 ├── requirements.txt
 ├── test_document.pdf         Fictional test corpus for reproducible evaluation
 ├── REPORT.md                 Evaluation methodology, numbers, analysis
@@ -81,7 +83,7 @@ multilingual-rag/
 ### Prerequisites
 
 - Python 3.11
-- PostgreSQL 14+ running locally (or remotely; set `DB_HOST` accordingly)
+- PostgreSQL 14+ running locally, OR a hosted Postgres URL (Neon, Supabase, etc.)
 - A Gemini API key from https://aistudio.google.com/apikey (free tier works)
 - Docker Desktop (optional, only for the containerized path)
 
@@ -102,18 +104,25 @@ GEMINI_API_KEY=your_key_here
 JWT_SECRET_KEY=any_long_random_string
 DB_NAME=ragdb
 DB_USER=postgres
-DB_PASSWORD=your_local_postgres_password
+DB_PASSWORD=your_postgres_password
 DB_HOST=localhost
 DB_PORT=5432
 ```
 
-Create the database (one-time):
+(For hosted Postgres, set `DB_HOST` to the hosted hostname, set `DB_USER` and `DB_PASSWORD` to the hosted credentials, set `DB_NAME` to the hosted database name, and add `DB_SSLMODE=require`.)
 
-```sql
-CREATE DATABASE ragdb;
+Create the schema (one-time):
+
+```powershell
+# Connect to your Postgres with psql, then run:
+\i init_schema.sql
 ```
 
-Tables are created automatically on backend startup.
+Or run the schema from Python:
+
+```powershell
+python -c "from backend.database import get_connection; conn=get_connection(); cur=conn.cursor(); cur.execute(open('init_schema.sql').read()); conn.commit(); conn.close(); print('Schema created')"
+```
 
 Ingest the bundled test document:
 
@@ -124,13 +133,13 @@ python backend\ingest.py test_document.pdf
 Run the backend:
 
 ```powershell
-uvicorn backend.main:app --reload --port 8000
+python -m uvicorn backend.main:app --reload --port 8000
 ```
 
 In a second terminal, run the frontend:
 
 ```powershell
-streamlit run frontend\app.py
+python -m streamlit run frontend\app.py
 ```
 
 The app opens at `http://localhost:8501`. The backend is at `http://localhost:8000`.
@@ -164,7 +173,11 @@ The retrieval evaluation is fully deterministic given a fixed corpus. The faithf
 
 ## Screenshots
 
-*Screenshots to be added.*
+*Screenshots and demo GIF to be added.*
+
+## A note on multilingual coverage
+
+This project is end-to-end tested on **English and Hindi**. The embedding model (`paraphrase-multilingual-MiniLM-L12-v2`) is trained on 50+ languages, so the pipeline accepts queries in other languages as well, and language detection and generation are language-agnostic. However, retrieval quality varies across languages — particularly for languages with scripts that differ markedly from the source corpus (for example, querying an English document in Telugu). The system fails safely in those cases: it returns "I don't know" rather than hallucinating. See [REPORT.md](REPORT.md) for the cross-lingual analysis.
 
 ## Engineering Notes
 
@@ -175,6 +188,7 @@ A few decisions that turned out to matter in practice:
 - **CPU-only torch on cloud deploys.** The default `torch` install pulls CUDA wheels and busts the 1 GB free-tier memory budget on Streamlit Cloud. `--extra-index-url https://download.pytorch.org/whl/cpu` in `requirements.txt` keeps the install lean.
 - **`host.docker.internal` for the containerized backend.** Inside a container, `localhost` means the container itself. The Docker-managed DNS name `host.docker.internal` points back to the Windows host where PostgreSQL is running, which is the simplest path before moving everything into `docker-compose`.
 - **Free-tier Gemini limits.** `gemini-2.5-flash` allows 20 requests per day and 5 per minute on the free tier. The faithfulness eval script implements 30-second throttling between calls and retry-on-429, so it degrades gracefully when the daily quota is hit mid-run.
+- **Free-tier cloud hosts and the embedding image.** The full Docker image needs about 700-900 MB of RAM (torch + sentence-transformers + cross-encoder + ChromaDB). Free tiers on Render, Railway, and Fly.io cap at 256-512 MB, so this image cannot run on them as built. The deliberate alternative — calling hosted embedding/rerank APIs — would fit those tiers but adds 150-300 ms of network latency per query. Local-first models won that tradeoff. See [REPORT.md](REPORT.md) for the full deployment analysis.
 
 ## License
 
