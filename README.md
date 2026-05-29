@@ -31,41 +31,7 @@ The system achieves saturated recall and perfect faithfulness on this test set; 
 
 ## Architecture
 
-```
-                                  +---------------------------+
-                                  |    Streamlit Frontend     |
-                                  |  (login, upload, query)   |
-                                  +-------------+-------------+
-                                                |
-                                       HTTP + JWT bearer
-                                                |
-                                                v
-+---------------------------+   +---------------------------+
-|       PostgreSQL          |<--|     FastAPI Backend       |
-|  users, documents,        |   |   /register /login        |
-|  query_logs (latency)     |   |   /upload  /ask  /history |
-+---------------------------+   +-------------+-------------+
-                                              |
-                          +-------------------+-------------------+
-                          |                                       |
-                          v                                       v
-              +-----------------------+              +-----------------------+
-              |   ChromaDB (local)    |              |   Gemini 2.5 Flash    |
-              |   persistent vectors  |              |   grounded answer     |
-              +-----------------------+              +-----------------------+
-                          ^
-                          |
-              embed (paraphrase-multilingual-MiniLM-L12-v2)
-                          ^
-                          |
-                   chunk (250 chars, 50 overlap)
-                          ^
-                          |
-                    extract + clean (pypdf)
-                          ^
-                          |
-                       PDF upload
-```
+![Architecture diagram](architecture.svg)
 
 The FastAPI backend is containerized (Python 3.11-slim, 622 MB compressed image). For development, the backend connects to the host PostgreSQL via `host.docker.internal`.
 
