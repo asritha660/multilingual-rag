@@ -2,7 +2,7 @@
 
 ## Overview
 
-This report documents the measured performance of the Multilingual RAG Assistant on a curated test set. Evaluation covers retrieval quality, faithfulness of generated answers, and end-to-end latency. The test set lives in `evaluation/test_set.json` and the scripts that produced these numbers are `evaluation/evaluate_retrieval.py` and `evaluation/evaluate_faithfulness.py`.
+This report documents the measured performance of the Multilingual RAG Assistant on a curated test set. Evaluation covers retrieval quality, faithfulness of generated answers, end-to-end latency, and the deployment economics of the architecture. The test set lives in `evaluation/test_set.json` and the scripts that produced these numbers are `evaluation/evaluate_retrieval.py` and `evaluation/evaluate_faithfulness.py`.
 
 ## Test Corpus
 
@@ -89,6 +89,21 @@ A reasonable baseline for a single-retriever system on a 7-question test set wou
 
 The honest caveat is that this test set is small and was authored by the same person who tuned the pipeline. A larger, independently-authored test set would be the next rigor step.
 
+## Deployment Analysis
+
+The backend is fully containerized (see `Dockerfile`) and verified to run on the host machine via Docker Desktop. The image is `python:3.11-slim`-based, 2.9 GB on disk, 622 MB compressed. On a developer machine with adequate RAM, it starts in ~30 seconds (first run includes model downloads) and serves requests at the latencies measured above.
+
+The system was evaluated against three free-tier cloud hosts (Render, Railway, Fly.io) for portability. **All three free tiers cap memory at 256-512 MB**, which is insufficient for the loaded image: the multilingual embedding model (`paraphrase-multilingual-MiniLM-L12-v2`) and the cross-encoder reranker (`ms-marco-MiniLM-L-6-v2`), together with ChromaDB's in-memory index, occupy roughly 700-900 MB of resident memory once warmed up. The image is therefore deployable on any platform offering ≥1 GB RAM (Render Standard $25/mo, AWS t3.small, GCP e2-small, equivalent) but not on the major free tiers.
+
+This is a deliberate architectural choice. The alternative — calling hosted embedding and reranking APIs instead of running them locally — would fit a 256 MB container but would add ~150-300 ms of network latency to every query and introduce a third-party dependency for each retrieval. For a local-first system where retrieval latency is already a meaningful share of total request time (the rerank step alone is 0.2-0.5 s), keeping the models in-process is the better tradeoff. The cost is that the system is not free-tier-deployable as built.
+
+For this portfolio context, the project ships as:
+- A fully working local stack (`uvicorn` + Streamlit) with end-to-end demonstration
+- A portable Docker image suitable for any paid-tier host or self-hosted environment
+- A documented one-command Docker run for evaluators who want to verify portability
+
+Live cloud deployment is out of scope for this iteration.
+
 ## Reproducibility
 
 To reproduce these numbers:
@@ -109,6 +124,15 @@ python -m evaluation.evaluate_faithfulness
 
 Retrieval evaluation is fully deterministic given a fixed test set and ingested corpus. Faithfulness has minor variance because the LLM judge is non-deterministic, but in repeated runs against this corpus the score has been stable at 1.0.
 
+To reproduce the Dockerized backend:
+
+```powershell
+docker build -t multilingual-rag-backend .
+docker run -d --name rag-backend -p 8000:8000 -e DB_HOST=host.docker.internal multilingual-rag-backend
+```
+
+The backend will be reachable at `http://localhost:8000`.
+
 ## Limitations
 
 - **Small test set (7 questions).** Results are directionally meaningful but not statistically tight. A production deployment should expand this to 50-100 questions across multiple document types and languages.
@@ -117,7 +141,12 @@ Retrieval evaluation is fully deterministic given a fixed test set and ingested 
 - **Faithfulness judge is the same model family as the generator** (Gemini judging Gemini). A stronger judge model or a different judge family would give a more independent measurement.
 - **No translation-quality metric** for the Hindi path. The Hindi answer was qualitatively verified to be in Hindi and topically correct, but no BLEU- or COMET-style score is computed.
 - **Free-tier rate limits** on Gemini (20 requests/day, 5/minute) constrain how often the faithfulness eval can be run end-to-end.
+- **Free-tier cloud hosts cannot run the full image** (see Deployment Analysis); deployment requires ≥1 GB RAM hosting.
 
 ## Conclusion
 
-The Multilingual RAG Assistant achieves saturated recall (7/7 hit rate) and perfect faithfulness (6/6, 0% hallucinations) with ~2.9s end-to-end latency on a 7-question multilingual test set that includes a deliberate keyword-dilution stress test. The system's real remaining weakness is precision (0.35 average), which is the expected ceiling for K=4 on a small corpus and has clear, concrete mitigation paths. The evaluation harness — versioned test set, separate retrieval and faithfulness scripts, latency telemetry in PostgreSQL — is in place and can be re-run against any future change to chunking, retrieval, or generation.
+The Multilingual RAG Assistant achieves saturated recall (7/7 hit rate) and perfect faithfulness (6/6, 0% hallucinations) with ~2.9s end-to-end latency on a 7-question multilingual test set that includes a deliberate keyword-dilution stress test. The system's real remaining weakness is precision (0.35 average), which is the expected ceiling for K=4 on a small corpus and has clear, concrete mitigation paths.
+
+The system is portable (containerized) and reproducible (versioned test set + evaluation scripts + bundled test corpus) but is not deployable on the major free-tier cloud hosts due to memory footprint of the local-first embedding and reranking models — a documented architectural tradeoff in favor of latency and dependency independence.
+
+The evaluation harness — versioned test set, separate retrieval and faithfulness scripts, latency telemetry in PostgreSQL — is in place and can be re-run against any future change to chunking, retrieval, or generation.
