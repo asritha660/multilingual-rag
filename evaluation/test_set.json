@@ -1,35 +1,40 @@
 {
-  "description": "Evaluation test set for the Multilingual RAG Assistant, based on sample.pdf (the project plan).",
+  "description": "Evaluation test set for the Multilingual RAG Assistant, based on test_document.pdf (Brindleton Bike Share Rider Handbook).",
   "tests": [
     {
-      "question": "What vector database does this project recommend?",
-      "expected_keywords": ["Qdrant", "ChromaDB"],
+      "question": "What types of bikes are in the fleet?",
+      "expected_keywords": ["pedal", "electric"],
       "language": "en"
     },
     {
-      "question": "What programming language is used in this project?",
-      "expected_keywords": ["Python"],
+      "question": "How much does the annual membership cost?",
+      "expected_keywords": ["169"],
       "language": "en"
     },
     {
-      "question": "What is recommended for the backend?",
-      "expected_keywords": ["FastAPI"],
+      "question": "What is the minimum age requirement to use the service?",
+      "expected_keywords": ["16"],
       "language": "en"
     },
     {
-      "question": "How is the frontend deployed?",
-      "expected_keywords": ["Streamlit", "Vercel"],
+      "question": "When does the program suspend service?",
+      "expected_keywords": ["severe", "weather"],
       "language": "en"
     },
     {
-      "question": "What embeddings does the project suggest?",
-      "expected_keywords": ["Cohere", "OpenAI"],
+      "question": "What is the maximum charge for bike damage?",
+      "expected_keywords": ["250"],
       "language": "en"
     },
     {
-      "question": "इस प्रोजेक्ट के लिए कौन सा डेटाबेस अच्छा है?",
-      "expected_keywords": ["PostgreSQL", "MongoDB", "Qdrant", "ChromaDB"],
+      "question": "इस सेवा का उपयोग करने की न्यूनतम उम्र क्या है?",
+      "expected_keywords": ["16"],
       "language": "hi"
+    },
+    {
+      "question": "What payment methods are accepted?",
+      "expected_keywords": ["Visa", "Mastercard", "American Express"],
+      "language": "en"
     }
   ]
 }
