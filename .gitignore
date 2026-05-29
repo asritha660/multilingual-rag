@@ -5,3 +5,5 @@ __pycache__/
 sample.pdf
 
 *.bak
+
+.env.local-backup
