@@ -23,10 +23,11 @@ Evaluated on a 7-question test set (6 English plus 1 Hindi) over a fully fabrica
 | Hit Rate (recall proxy) | **7/7 = 1.00** |
 | Average Precision@K | **0.35** |
 | Average retrieval latency | **0.17s** |
+| Faithfulness score | **6/6 = 1.00** (LLM-judge, Gemini 2.5 Flash) |
+| Hallucination rate | **0.00** |
 | End-to-end query latency | **~2.9s** (generation dominates) |
-| Faithfulness score | *Full rerun pending; partial run scored 1.0* |
 
-The system achieves saturated recall on this test set; the genuine remaining weakness is precision, not recall. Detailed analysis lives in [REPORT.md](REPORT.md).
+The system achieves saturated recall and perfect faithfulness on this test set; the genuine remaining weakness is precision, not recall. Detailed analysis lives in [REPORT.md](REPORT.md).
 
 ## Architecture
 
@@ -104,6 +105,7 @@ multilingual-rag/
 │   └── evaluate_faithfulness.py Gemini-as-judge faithfulness scoring
 ├── Dockerfile                Backend container (python:3.11-slim, port 8000)
 ├── requirements.txt
+├── test_document.pdf         Fictional test corpus for reproducible evaluation
 ├── REPORT.md                 Evaluation methodology, numbers, analysis
 └── README.md                 (this file)
 ```
@@ -147,10 +149,10 @@ CREATE DATABASE ragdb;
 
 Tables are created automatically on backend startup.
 
-Ingest a document:
+Ingest the bundled test document:
 
 ```powershell
-python backend\ingest.py path\to\your_document.pdf
+python backend\ingest.py test_document.pdf
 ```
 
 Run the backend:
@@ -185,12 +187,14 @@ docker rm rag-backend
 
 ### Running the evaluation harness
 
-After ingesting a document:
+After ingesting `test_document.pdf`:
 
 ```powershell
 python -m evaluation.evaluate_retrieval
 python -m evaluation.evaluate_faithfulness   # uses Gemini quota
 ```
+
+The retrieval evaluation is fully deterministic given a fixed corpus. The faithfulness evaluation is subject to the free-tier Gemini quota (20 requests/day, 5/minute) and includes 30-second throttling and retry-on-429 logic.
 
 ## Screenshots
 
