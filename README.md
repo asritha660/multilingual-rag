@@ -173,7 +173,16 @@ The retrieval evaluation is fully deterministic given a fixed corpus. The faithf
 
 ## Screenshots
 
-*Screenshots and demo GIF to be added.*
+### English query
+
+![English answer screenshot](demo_english.png)
+
+### Hindi query (same question, different language)
+
+![Hindi answer screenshot](demo_hindi.png)
+
+Both queries run against the same `test_document.pdf` corpus. Language detection picks the right language, embeddings find the matching content, and Gemini generates a grounded answer in the query's language.
+
 
 ## A note on multilingual coverage
 
