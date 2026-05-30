@@ -1,4 +1,4 @@
--- Multilingual RAG schema for PostgreSQL (Neon-compatible)
+﻿-- Multilingual RAG schema for PostgreSQL (Neon-compatible)
 
 CREATE TABLE IF NOT EXISTS users (
     user_id SERIAL PRIMARY KEY,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS query_logs (
     user_query TEXT NOT NULL,
     detected_language VARCHAR(16),
     response_time_ms INTEGER,
-    retrieved_chunks JSONB,
+    retrieved_chunks INTEGER,
     answer TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
